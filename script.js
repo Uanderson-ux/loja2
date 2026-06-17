@@ -23,6 +23,39 @@ function handleBuy(productName) {
     alert(`🛒 Você selecionou: ${productName}\n\nAqui você colocará o seu link de pagamento (Hotmart, Kiwify, Mercado Pago, etc). O cliente será redirecionado para a tela de checkout.`);
 }
 
+// --- Card Options Dropdown ---
+
+// Toggle the dropdown on the ⋮ button
+function toggleCardMenu(btn, event) {
+    event.stopPropagation();
+    const dropdown = btn.nextElementSibling;
+    // Close any other open dropdown first
+    document.querySelectorAll('.card-dropdown.open').forEach(d => {
+        if (d !== dropdown) d.classList.remove('open');
+    });
+    dropdown.classList.toggle('open');
+}
+
+// Close all dropdowns when clicking anywhere else
+document.addEventListener('click', () => {
+    document.querySelectorAll('.card-dropdown.open').forEach(d => d.classList.remove('open'));
+});
+
+// Delete a product card
+function deleteProduct(btn, event) {
+    event.stopPropagation();
+    const card = btn.closest('.product-card');
+    if (confirm('Tem certeza que deseja excluir este produto? Esta ação não pode ser desfeita.')) {
+        card.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.9)';
+        setTimeout(() => {
+            card.remove();
+            saveGridState();
+        }, 300);
+    }
+}
+
 // Fade-in animation on scroll using Intersection Observer
 const observerOptions = {
     root: null,
@@ -68,12 +101,16 @@ function saveGridState() {
 }
 
 function loadGridState() {
-    const saved = localStorage.getItem('storeGridState');
-    if (saved) {
-        const addCard = document.querySelector('.add-product-card');
-        document.querySelectorAll('.product-card:not(.add-product-card)').forEach(c => c.remove());
-        addCard.insertAdjacentHTML('beforebegin', saved);
-    }
+    const addCard = document.querySelector('.add-product-card');
+    
+    // Se o cartão de adicionar não existir (versão pública), ignoramos a memória
+    // para não apagar a vitrine original e quebrar o script.
+    if (!addCard) return;
+
+    // Limpa o cache antigo do localStorage para garantir que os cards do HTML
+    // (com o botão de lixeira atualizado) sejam sempre usados como base.
+    // O estado só é salvo após ações do usuário (adicionar/editar/excluir).
+    localStorage.removeItem('storeGridState');
 }
 
 function openAddModal() {
@@ -90,6 +127,9 @@ function closeAddModal() {
 function editProduct(btn, event) {
     event.stopPropagation();
     const card = btn.closest('.product-card');
+    // Close dropdown if open
+    const dropdown = btn.closest('.card-dropdown');
+    if (dropdown) dropdown.classList.remove('open');
     currentEditingCard = card;
 
     const name = card.querySelector('h3').innerText;
@@ -104,17 +144,29 @@ function editProduct(btn, event) {
         if (match) link = match[1];
     }
     
-    const cardImg = card.querySelector('.card-image');
-    const styleImg = cardImg.style.backgroundImage;
+    const cardImg = card.querySelector('.card-img');
     let image = "";
-    if (styleImg && styleImg.includes('url(')) {
-        image = styleImg.replace('url("', '').replace('")', '').replace("url('", '').replace("')", '');
+    if (cardImg && cardImg.src) {
+        image = cardImg.src;
+    } else {
+        const cardImgLegacy = card.querySelector('.card-image');
+        if (cardImgLegacy) {
+            const styleImg = cardImgLegacy.style.backgroundImage;
+            if (styleImg && styleImg.includes('url(')) {
+                image = styleImg.replace('url("', '').replace('")', '').replace("url('", '').replace("')", '');
+            }
+        }
     }
+
+    // Read description
+    const descEl = card.querySelector('p');
+    const desc = descEl ? descEl.innerText : '';
 
     document.getElementById('prodName').value = name;
     document.getElementById('prodPrice').value = price;
     document.getElementById('prodLink').value = link;
-    document.getElementById('prodImage').value = image.startsWith('http') || image.startsWith('assets') || image.startsWith('file') ? image : "";
+    document.getElementById('prodDesc').value = desc;
+    document.getElementById('prodImage').value = image.startsWith('http') || image.startsWith('assets') || image.startsWith('file') ? image : '';
     
     document.querySelector('.modal-header h2').innerText = "Editar Produto";
     openAddModal();
@@ -124,20 +176,41 @@ function handleAddProduct(event) {
     event.preventDefault();
     
     const name = document.getElementById('prodName').value;
+    const desc = document.getElementById('prodDesc').value.trim();
     const price = document.getElementById('prodPrice').value;
     const link = document.getElementById('prodLink').value;
     const imageUrl = document.getElementById('prodImage').value;
     const imageFile = document.getElementById('prodImageFile').files[0];
     
-    const finalizeProduct = (finalImage) => {
+        const finalizeProduct = (finalImage) => {
         if (currentEditingCard) {
             currentEditingCard.querySelector('h3').innerText = name;
             currentEditingCard.querySelector('.price').innerText = `R$ ${price}`;
             currentEditingCard.querySelector('.btn-buy').setAttribute('onclick', `window.location.href='${link}'`);
+
+            // Update description
+            let pEl = currentEditingCard.querySelector('p');
+            if (desc) {
+                if (!pEl) {
+                    pEl = document.createElement('p');
+                    currentEditingCard.querySelector('.price-row').before(pEl);
+                }
+                pEl.innerText = desc;
+            } else if (pEl) {
+                pEl.remove();
+            }
             
             if (finalImage && finalImage.trim() !== '') {
-                currentEditingCard.querySelector('.card-image').style.backgroundImage = `url('${finalImage}')`;
-                currentEditingCard.querySelector('.card-image').style.backgroundColor = '#1e1e2f';
+                const imgEl = currentEditingCard.querySelector('.card-img');
+                if (imgEl) {
+                    imgEl.src = finalImage;
+                } else {
+                    const legacyDiv = currentEditingCard.querySelector('.card-image');
+                    if (legacyDiv) {
+                        legacyDiv.style.backgroundImage = `url('${finalImage}')`;
+                        legacyDiv.style.backgroundColor = '#1e1e2f';
+                    }
+                }
             }
             
             saveGridState();
@@ -145,7 +218,7 @@ function handleAddProduct(event) {
             return;
         }
 
-        renderNewProduct(name, price, link, finalImage);
+        renderNewProduct(name, desc, price, link, finalImage);
         saveGridState();
         closeAddModal();
     };
@@ -161,23 +234,35 @@ function handleAddProduct(event) {
     }
 }
 
-function renderNewProduct(name, price, link, image) {
+function renderNewProduct(name, desc, price, link, image) {
     const addCard = document.querySelector('.add-product-card');
     
-    const imageStyle = image && image.trim() !== '' 
-        ? `background-image: url('${image}'); background-color: #1e1e2f; background-size: cover; background-position: center;` 
-        : `background: linear-gradient(135deg, #1e1e2f, #4c2b82);`;
-    
+    const imageHTML = image && image.trim() !== ''
+        ? `<img class="card-img" src="${image}" alt="${name}">`
+        : '';
+
+    const descHTML = desc && desc.trim() !== ''
+        ? `<p>${desc}</p>`
+        : '';
+
     const cardHTML = `
         <div class="product-card" style="position: relative;">
-            <button class="edit-btn" title="Editar Produto" onclick="editProduct(this, event)">⋮</button>
-            <div class="card-image" style="${imageStyle}"></div>
+            <div class="card-options">
+                <button class="edit-btn" onclick="toggleCardMenu(this, event)" title="Opções">⋮</button>
+                <div class="card-dropdown">
+                    <button class="card-dropdown-item" onclick="editProduct(this, event)">✏️ Editar</button>
+                    <button class="card-dropdown-item delete-option" onclick="deleteProduct(this, event)">🗑️ Excluir</button>
+                </div>
+            </div>
+            <div class="card-image-wrapper" style="background-color: #1e1e2f;">
+                ${imageHTML}
+            </div>
             <div class="card-content">
-                <span class="badge highlight">Novo</span>
                 <h3>${name}</h3>
-                <p>Produto adicionado manualmente.</p>
+                ${descHTML}
                 <div class="price-row">
                     <span class="price">R$ ${price}</span>
+                    <button class="btn-delete-direct" onclick="deleteProduct(this, event)" title="Excluir produto">🗑️</button>
                     <button class="btn-buy" onclick="window.location.href='${link}'">Acessar</button>
                 </div>
             </div>
@@ -224,8 +309,10 @@ function exportHTML() {
     // Get the HTML string
     const htmlContent = "<!DOCTYPE html>\n" + docClone.documentElement.outerHTML;
     
-    // Clear localStorage so the next load uses the hardcoded HTML without duplicating
-    localStorage.removeItem('storeGridState');
+    // NOTE: localStorage is intentionally NOT cleared here.
+    // loadGridState() already ignores localStorage on the public index.html
+    // (because it has no .add-product-card element), so there is no duplication risk.
+    // Keeping the state lets the admin reload all products on next open.
     
     // Create download link
     const blob = new Blob([htmlContent], { type: 'text/html' });
